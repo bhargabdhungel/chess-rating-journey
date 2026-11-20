@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chess Rating Journey</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+/* Layout: a single centered column, controls on top, then overview, tabs, and one panel per time control */
+:root {
+  --bg: #f6f7f5; --panel: #ffffff; --fg: #1d2420; --muted: #5d6a63; --line: #dfe4e0;
+  --accent: #2f6f55; --accent-soft: #e3efe9;
+  --win: #3f8f5f; --draw: #a3aca7; --loss: #c4573f;
+  --grid: #e8ece9; --ref: #9aa59f;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121614; --panel: #1a201d; --fg: #e6ece8; --muted: #9aa8a0; --line: #2b3430;
+    --accent: #6cc39a; --accent-soft: #1f3129;
+    --win: #5fb882; --draw: #6d7772; --loss: #e07a62;
+    --grid: #242c28; --ref: #6b7670;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121614; --panel: #1a201d; --fg: #e6ece8; --muted: #9aa8a0; --line: #2b3430;
+  --accent: #6cc39a; --accent-soft: #1f3129;
+  --win: #5fb882; --draw: #6d7772; --loss: #e07a62;
+  --grid: #242c28; --ref: #6b7670;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font-body); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 28px; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.7rem, 4vw, 2.3rem); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 500; font-size: 1.1rem; margin: 0; text-wrap: balance; }
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.top p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
+form.search { display: flex; gap: 8px; flex-wrap: wrap; }
+form.search input { font: inherit; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--fg); min-width: 0; width: 220px; }
+form.search button, .btn { font: inherit; font-weight: 500; padding: 9px 16px; border-radius: var(--radius); border: 1px solid var(--accent); background: var(--accent); color: var(--bg); cursor: pointer; }
+form.search button:disabled { opacity: .6; cursor: wait; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status { font-size: .9rem; color: var(--muted); min-height: 1.5em; margin: 0; }
+.status.err { color: var(--loss); }
+.bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.lede { font-size: 1.05rem; margin: 0; max-width: 70ch; }
+.lede b { font-variant-numeric: tabular-nums; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tile.link { cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.tile.link:hover { border-color: var(--accent); }
+.label { font-size: .75rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.big { font-family: var(--font-display); font-size: 2rem; font-weight: 500; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sub { font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.up { color: var(--win); } .down { color: var(--loss); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs button { font: inherit; font-weight: 500; background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.tabs button .n { font-weight: 400; color: var(--muted); font-size: .8rem; margin-left: 4px; }
+.panel { display: flex; flex-direction: column; gap: 28px; }
+.section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.note { font-size: .82rem; color: var(--muted); margin: 0; max-width: 75ch; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; overflow: visible; }
+.chart svg text { font: 12px var(--font-body); fill: var(--muted); }
+.chart svg text.strong { fill: var(--fg); font-weight: 600; }
+.chart .tick line { stroke: var(--grid); }
+.chart .domain { stroke: var(--line); }
+.toggle { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.toggle button { font: inherit; font-size: .82rem; padding: 6px 12px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.toggle button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); font-weight: 500; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: .82rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 500; }
+.tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,.14); border-radius: 8px; padding: 6px 10px; font-size: .8rem; line-height: 1.45; white-space: nowrap; z-index: 3; }
+.tip .m { color: var(--muted); }
+.empty { padding: 40px 0; color: var(--muted); }
+footer { font-size: .8rem; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>Chess Rating Journey</h1>
+      <p>Enter any chess.com username to see how their rapid, blitz and bullet ratings have moved since their first game.</p>
+    </div>
+    <form class="search" id="search">
+      <label for="username" class="label" style="position:absolute;left:-9999px">chess.com username</label>
+      <input id="username" name="username" placeholder="chess.com username" autocomplete="off" spellcheck="false" required>
+      <button id="go" type="submit">Show progress</button>
+    </form>
+  </div>
+  <div>
+    <p class="status" id="status" role="status"></p>
+    <div class="bar" id="bar" hidden><i></i></div>
+  </div>
+
+  <div id="results" hidden>
+    <div class="section" style="gap:14px">
+      <h2 id="who"></h2>
+      <div class="tiles" id="overview"></div>
+    </div>
+    <div style="height:28px"></div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div style="height:24px"></div>
+    <div class="panel" id="panel" role="tabpanel">
+      <p class="lede" id="lede"></p>
+      <div class="tiles" id="tiles"></div>
+
+      <div class="section">
+        <div class="head">
+          <h2 id="ratingTitle">Rating after every game</h2>
+          <div class="toggle" role="group" aria-label="Horizontal axis">
+            <button type="button" data-mode="game" aria-pressed="true">By game number</button>
+            <button type="button" data-mode="date" aria-pressed="false">By date</button>
+          </div>
+        </div>
+        <div class="chart" id="ratingChart"></div>
+        <p class="note">Dashed lines (or shaded spans by date) mark breaks of more than 90 days. After a long break chess.com treats a rating as uncertain, so the first games back can move it a lot.</p>
+      </div>
+
+      <div class="section">
+        <h2>Games and results each month</h2>
+        <div class="legend"><span><i style="background:var(--win)"></i>Wins</span><span><i style="background:var(--draw)"></i>Draws</span><span><i style="background:var(--loss)"></i>Losses</span></div>
+        <div class="chart" id="monthChart"></div>
+        <p class="note">Only months with at least one game are shown.</p>
+      </div>
+
+      <div class="grid2">
+        <div class="section">
+          <h2>Score against weaker and stronger opponents</h2>
+          <div class="chart" id="oppChart"></div>
+          <p class="note">Score counts a win as 1 and a draw as ½. The gap compares the opponent's rating with the player's rating going into the game.</p>
+        </div>
+        <div class="section">
+          <h2>White vs Black</h2>
+          <div class="tablewrap"><table><thead><tr><th>Color</th><th>Games</th><th>W</th><th>D</th><th>L</th><th>Win %</th></tr></thead><tbody id="colorBody"></tbody></table></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Momentum and tilt</h2>
+        <div class="tiles" id="momentum"></div>
+        <p class="note">"Next game" counts only games that ended within 45 minutes of the previous one, so it reflects playing on straight away. A big gap between the two scores means results carry over from one game to the next.</p>
+      </div>
+
+      <div class="grid2">
+        <div class="section">
+          <h2>Score by time of day</h2>
+          <div class="chart" id="hourChart"></div>
+          <p class="note">Hours in your device's time zone. Faded bars have fewer than 20 games.</p>
+        </div>
+        <div class="section">
+          <h2>Score by day of week</h2>
+          <div class="chart" id="dayChart"></div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="section">
+          <h2>How wins happen</h2>
+          <div class="chart" id="winHow"></div>
+        </div>
+        <div class="section">
+          <h2>How losses happen</h2>
+          <div class="chart" id="lossHow"></div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="section">
+          <h2>Openings as White</h2>
+          <div class="tablewrap"><table><thead><tr><th>Opening</th><th>Games</th><th>Score</th></tr></thead><tbody id="openWhite"></tbody></table></div>
+        </div>
+        <div class="section">
+          <h2>Openings as Black</h2>
+          <div class="tablewrap"><table><thead><tr><th>Opening</th><th>Games</th><th>Score</th></tr></thead><tbody id="openBlack"></tbody></table></div>
+        </div>
+      </div>
+      <p class="note" style="margin-top:-16px">Your 8 most-played openings per color, grouped by chess.com's opening name. Green scores are 55% or better, red are 45% or worse.</p>
+
+      <div class="section">
+        <h2>Activity over the last year</h2>
+        <div class="tablewrap"><div class="chart" id="calendar"></div></div>
+        <p class="note">Each square is a day. Stronger color means more games.</p>
+      </div>
+
+      <div class="section">
+        <h2>Biggest wins</h2>
+        <div class="tablewrap"><table><thead><tr><th>Opponent</th><th>Their rating</th><th>Gap</th><th>Date</th><th>Ended by</th><th></th></tr></thead><tbody id="bestWins"></tbody></table></div>
+        <p class="note">Wins against the highest-rated opponents, compared with your rating going into the game.</p>
+      </div>
+    </div>
+  </div>
+
+  <footer>Data comes straight from chess.com's public API in your browser. Standard chess only; Chess960 and daily games are left out.</footer>
+</div>
+
+<script>
+const TCS = [['rapid', 'Rapid'], ['blitz', 'Blitz'], ['bullet', 'Bullet']];
+const DRAWS = new Set(['agreed', 'repetition', 'stalemate', 'insufficient', '50move', 'timevsinsufficient']);
+const fmt = d3.format(',');
+const signed = (v) => v == null ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '±') + fmt(Math.abs(v));
+const fmtDay = d3.utcFormat('%-d %b %Y');
+const fmtMonth = (m) => d3.utcFormat('%b %Y')(new Date(m + '-01T00:00:00Z'));
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+let state = { user: null, byTc: {}, tc: 'rapid', mode: 'game' };
+let loadToken = 0;
+
+// ---------- loading ----------
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (r.status === 404) throw new Error('notfound');
+  if (!r.ok) throw new Error('http ' + r.status);
+  return r.json();
+}
+
+async function load(username) {
+  const token = ++loadToken;
+  const user = username.trim().toLowerCase();
+  if (!user) return;
+  $('go').disabled = true;
+  setStatus(`Looking up ${user}…`);
+  showBar(0);
+  try {
+    const { archives } = await getJSON(`https://api.chess.com/pub/player/${encodeURIComponent(user)}/games/archives`);
+    if (!archives.length) throw new Error('nogames');
+    const months = new Array(archives.length);
+    let done = 0, next = 0;
+    const worker = async () => {
+      while (next < archives.length) {
+        const i = next++;
+        months[i] = (await getJSON(archives[i])).games || [];
+        done++;
+        if (token !== loadToken) return;
+        showBar(done / archives.length);
+        setStatus(`Loading games: month ${done} of ${archives.length}…`);
+      }
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
+    if (token !== loadToken) return;
+    const byTc = { rapid: [], blitz: [], bullet: [] };
+    for (const g of months.flat()) {
+      if (!byTc[g.time_class] || g.rules !== 'chess') continue;
+      const side = g.white.username.toLowerCase() === user ? 'white' : 'black';
+      const opp = side === 'white' ? 'black' : 'white';
+      const r = g[side].result;
+      byTc[g.time_class].push({
+        t: new Date(g.end_time * 1000), rating: g[side].rating, opp: g[opp].rating,
+        result: r === 'win' ? 'Win' : DRAWS.has(r) ? 'Draw' : 'Loss',
+        color: side === 'white' ? 'White' : 'Black', url: g.url,
+        oppName: g[opp].username,
+        how: r === 'win' ? g[opp].result : r,
+        opening: openingName(g.eco)
+      });
+    }
+    for (const k in byTc) byTc[k].sort((a, b) => a.t - b.t).forEach((g, i) => { g.i = i + 1; });
+    const total = TCS.reduce((s, [k]) => s + byTc[k].length, 0);
+    if (!total) throw new Error('nogames');
+    state.user = user; state.byTc = byTc;
+    state.tc = TCS.map(([k]) => k).reduce((best, k) => byTc[k].length > byTc[best].length ? k : best, 'rapid');
+    try { history.replaceState(null, '', '?user=' + encodeURIComponent(user)); } catch (e) {}
+    try { localStorage.setItem('chess-journey-user', user); } catch (e) {}
+    setStatus(`Loaded ${fmt(total)} rapid, blitz and bullet games for ${user}.`);
+    $('results').hidden = false;
+    renderAll();
+  } catch (e) {
+    if (token !== loadToken) return;
+    const msg = e.message === 'notfound' ? `No chess.com player called "${user}". Check the spelling and try again.`
+      : e.message === 'nogames' ? `${user} has no rapid, blitz or bullet games yet.`
+      : `Couldn't reach chess.com (${e.message}). Check your connection and try again.`;
+    setStatus(msg, true);
+  } finally {
+    if (token === loadToken) { $('go').disabled = false; $('bar').hidden = true; }
+  }
+}
+function setStatus(t, err) { const s = $('status'); s.textContent = t; s.classList.toggle('err', !!err); }
+function showBar(p) { $('bar').hidden = false; $('bar').firstElementChild.style.width = (p * 100).toFixed(1) + '%'; }
+
+// ---------- stats ----------
+function summarize(games) {
+  if (!games.length) return null;
+  const peak = games.reduce((a, g) => g.rating > a.rating ? g : a, games[0]);
+  const low = games.reduce((a, g) => g.rating < a.rating ? g : a, games[0]);
+  const last = games[games.length - 1];
+  const wins = games.filter((g) => g.result === 'Win').length;
+  const draws = games.filter((g) => g.result === 'Draw').length;
+  const monthly = byMonth(games);
+  return {
+    current: last.rating, first: games[0].rating, since: games[0].t, peak: peak.rating, peakDate: peak.t,
+    low: low.rating, lowDate: low.t, climb: last.rating - low.rating,
+    games: games.length, wins, draws, losses: games.length - wins - draws,
+    winPct: wins / games.length * 100, monthly, monthChange: monthly[monthly.length - 1].change,
+    lastMonth: monthly[monthly.length - 1].month
+  };
+}
+function byMonth(games) {
+  const out = []; let prevEnd = null;
+  for (const [month, gs] of d3.groups(games, (g) => d3.utcFormat('%Y-%m')(g.t))) {
+    const end = gs[gs.length - 1].rating;
+    const wins = gs.filter((g) => g.result === 'Win').length, draws = gs.filter((g) => g.result === 'Draw').length;
+    out.push({ month, games: gs.length, end, change: prevEnd == null ? null : end - prevEnd, peak: d3.max(gs, (g) => g.rating),
+      wins, draws, losses: gs.length - wins - draws, winPct: wins / gs.length * 100 });
+    prevEnd = end;
+  }
+  return out;
+}
+function vsOpp(games) {
+  const b = [['150+ lower', -Infinity, -150], ['50–149 lower', -149, -50], ['Within 49', -49, 49], ['50–149 higher', 50, 149], ['150+ higher', 150, Infinity]]
+    .map(([bucket, lo, hi]) => ({ bucket, lo, hi, games: 0, points: 0 }));
+  games.forEach((g, k) => {
+    const gap = g.opp - (k ? games[k - 1].rating : g.rating);
+    const x = b.find((x) => gap >= x.lo && gap <= x.hi);
+    x.games++; x.points += g.result === 'Win' ? 1 : g.result === 'Draw' ? 0.5 : 0;
+  });
+  return b.map((x) => ({ ...x, score: x.games ? x.points / x.games * 100 : null }));
+}
+
+// ---------- rendering ----------
+function renderAll() {
+  const { byTc, user } = state;
+  $('who').textContent = user;
+  const ov = $('overview'); ov.replaceChildren();
+  const tabs = $('tabs'); tabs.replaceChildren();
+  TCS.forEach(([k, name]) => {
+    const s = summarize(byTc[k]);
+    const t = el('button', 'tile link'); t.type = 'button';
+    t.append(el('span', 'label', name), el('span', 'big', s ? fmt(s.current) : '—'),
+      el('span', 'sub', s ? `Peak ${fmt(s.peak)} · ${fmt(s.games)} games` : 'No games'));
+    t.disabled = !s; if (!s) t.classList.remove('link');
+    t.addEventListener('click', () => { selectTab(k); $('tabs').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    ov.append(t);
+    const b = el('button'); b.type = 'button'; b.setAttribute('role', 'tab'); b.dataset.tab = k;
+    b.append(document.createTextNode(name), el('span', 'n', fmt(byTc[k].length)));
+    b.disabled = !s;
+    b.addEventListener('click', () => selectTab(k));
+    tabs.append(b);
+  });
+  selectTab(state.tc);
+}
+function selectTab(k) {
+  state.tc = k;
+  document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
+  renderPanel();
+}
+function renderPanel() {
+  const games = state.byTc[state.tc];
+  const name = TCS.find(([k]) => k === state.tc)[1];
+  const s = summarize(games);
+  const lede = $('lede'); lede.replaceChildren();
+  if (!s) { lede.textContent = `No ${state.tc} games.`; return; }
+  const b = (t, cls) => { const x = el('b', cls, t); return x; };
+  lede.append(`Rated `, b(fmt(s.current)), ` in ${state.tc}, `, b(signed(s.climb), s.climb > 0 ? 'up' : ''),
+    ` above the low of `, b(fmt(s.low)), ` on ${fmtDay(s.lowDate)}. `,
+    s.current === s.peak ? 'This is an all-time high.' : `Best so far is ${fmt(s.peak)}, ${fmt(s.peak - s.current)} points above now.`);
+  const tiles = $('tiles'); tiles.replaceChildren();
+  const tile = (label, big, sub, bigCls) => { const t = el('div', 'tile'); t.append(el('span', 'label', label), el('span', 'big ' + (bigCls || ''), big), sub); tiles.append(t); };
+  const sub = (...parts) => { const x = el('span', 'sub'); parts.forEach((p) => x.append(p)); return x; };
+  tile(`Current ${state.tc}`, fmt(s.current), sub(`${fmtMonth(s.lastMonth)} `, el('span', s.monthChange > 0 ? 'up' : s.monthChange < 0 ? 'down' : '', signed(s.monthChange))));
+  tile('Peak', fmt(s.peak), sub(`Reached ${fmtDay(s.peakDate)}`));
+  tile('Climb from low', signed(s.climb), sub(`Low ${fmt(s.low)} · first game ${fmt(s.first)}`), s.climb > 0 ? 'up' : '');
+  tile('Games', fmt(s.games), sub(`${fmt(s.wins)} W · ${fmt(s.draws)} D · ${fmt(s.losses)} L`));
+  tile('Win rate', s.winPct.toFixed(1) + '%', sub(`Since ${fmtDay(s.since)}`));
+  $('ratingTitle').textContent = `${name} rating after every game`;
+  drawRating(); drawMonths(s.monthly); drawOpp(vsOpp(games)); fillColor(games);
+  fillMomentum(games); drawTiming(games); drawEndings(games); fillOpenings(games); drawCalendar(games); fillBestWins(games);
+}
+
+// Place a label in the first free row so labels never overlap. Returns row index or -1.
+function placeLabel(placed, x0, x1, maxRows) {
+  for (let row = 0; row < maxRows; row++) {
+    if (!placed.some((p) => p.row === row && x0 < p.x1 + 6 && x1 > p.x0 - 6)) { placed.push({ x0, x1, row }); return row; }
+  }
+  return -1;
+}
+function textWidth(svg, text, cls) { const t = svg.append('text').attr('class', cls || null).text(text); const w = t.node().getComputedTextLength(); t.remove(); return w; }
+function tipFor(container) { const tip = el('div', 'tip'); tip.hidden = true; container.append(tip); return tip; }
+function placeTip(tip, container, x, y) {
+  const cw = container.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = x + 12; if (left + tw > cw) left = x - tw - 12;
+  let top = y - th - 10; if (top < 0) top = y + 12;
+  tip.style.left = Math.max(0, left) + 'px'; tip.style.top = top + 'px';
+}
+
+function drawRating() {
+  const box = $('ratingChart'); box.replaceChildren();
+  const games = state.byTc[state.tc]; if (!games.length) return;
+  const byDate = state.mode === 'date';
+  const xv = (g) => byDate ? g.t : g.i;
+  const W = Math.max(280, box.clientWidth), H = 340;
+  const m = { t: 18, r: 16, b: 30, l: 40 };
+  const svg = d3.select(box).append('svg').attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('role', 'img').attr('aria-label', `${state.tc} rating after each of ${games.length} games, from ${games[0].rating} to ${games[games.length - 1].rating}`);
+  // breaks (computed first so we know how many label rows to reserve)
+  const breaks = [];
+  games.forEach((g, k) => { if (k && g.t - games[k - 1].t > 90 * 864e5) breaks.push(k); });
+  const ext = d3.extent(games, (g) => g.rating);
+  const y = d3.scaleLinear().domain(ext).nice();
+  const ticks = y.ticks(6);
+  m.l = Math.ceil(d3.max(ticks, (t) => textWidth(svg, String(t)))) + 12;
+  const endLabel = fmt(games[games.length - 1].rating);
+  m.r = Math.ceil(textWidth(svg, endLabel, 'strong')) + 14;
+  const rowH = 15, labelRows = breaks.length ? 3 : 0;
+  const plotTop = m.t + labelRows * rowH;
+  y.range([H - m.b, plotTop]);
+  svg.append('g').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(6).tickFormat(d3.format('d')).tickSize(-(W - m.l - m.r)))
+    .call((g) => g.select('.domain').remove());
+  const x = (byDate ? d3.scaleUtc().domain(d3.extent(games, (g) => g.t)) : d3.scaleLinear().domain([1, Math.max(2, games.length)])).range([m.l, W - m.r]);
+  const nt = Math.max(2, Math.floor((W - m.l - m.r) / 95));
+  svg.append('g').attr('transform', `translate(0,${H - m.b})`)
+    .call(d3.axisBottom(x).ticks(nt).tickFormat(byDate ? d3.utcFormat('%b %Y') : d3.format(',')).tickSizeOuter(0));
+
+  const placed = [];
+  const breakG = svg.insert('g', ':first-child');
+  breaks.forEach((k) => {
+    const months = Math.max(1, Math.round((games[k].t - games[k - 1].t) / (30.44 * 864e5)));
+    if (byDate) {
+      const x0 = x(games[k - 1].t), x1 = x(games[k].t);
+      breakG.append('rect').attr('x', x0).attr('y', plotTop).attr('width', Math.max(0, x1 - x0)).attr('height', H - plotTop - m.b)
+        .style('fill', 'var(--ref)').style('opacity', 0.14);
+      for (const text of [`${months}-month break`, `${months} mo`]) {
+        const w = textWidth(svg, text);
+        if (w + 8 > x1 - x0 && text.endsWith('mo') === false) continue;
+        const cx = (x0 + x1) / 2;
+        const row = placeLabel(placed, cx - w / 2, cx + w / 2, labelRows);
+        if (row >= 0) svg.append('text').attr('x', cx).attr('y', m.t + row * rowH + 10).attr('text-anchor', 'middle').text(text);
+        break;
+      }
+    } else {
+      const xx = x(games[k].i);
+      breakG.append('line').attr('x1', xx).attr('x2', xx).attr('y1', plotTop).attr('y2', H - m.b)
+        .style('stroke', 'var(--ref)').style('stroke-dasharray', '3 3');
+      for (const text of [`Back after ${months} months`, `+${months} mo`]) {
+        const w = textWidth(svg, text);
+        const anchorRight = xx + 4 + w > W - m.r;
+        const x0 = anchorRight ? xx - 4 - w : xx + 4;
+        const row = placeLabel(placed, x0, x0 + w, labelRows);
+        if (row >= 0) {
+          svg.append('text').attr('x', anchorRight ? xx - 4 : xx + 4).attr('text-anchor', anchorRight ? 'end' : 'start').attr('y', m.t + row * rowH + 10).text(text);
+          svg.append('line').attr('x1', xx).attr('x2', xx).attr('y1', m.t + row * rowH + 13).attr('y2', plotTop).style('stroke', 'var(--ref)').style('stroke-dasharray', '1 2');
+          break;
+        }
+      }
+    }
+  });
+
+  const segs = []; let cur = [];
+  games.forEach((g, k) => { if (byDate && breaks.includes(k)) { segs.push(cur); cur = []; } cur.push(g); });
+  segs.push(cur);
+  const line = d3.line().x((g) => x(xv(g))).y((g) => y(g.rating));
+  segs.forEach((s) => {
+    if (s.length === 1) svg.append('circle').attr('cx', x(xv(s[0]))).attr('cy', y(s[0].rating)).attr('r', 1.6).style('fill', 'var(--accent)');
+    else svg.append('path').attr('d', line(s)).style('fill', 'none').style('stroke', 'var(--accent)').style('stroke-width', 1.3).style('stroke-linejoin', 'round');
+  });
+  const last = games[games.length - 1];
+  const peak = games.reduce((a, g) => g.rating > a.rating ? g : a, games[0]);
+  const low = games.reduce((a, g) => g.rating < a.rating ? g : a, games[0]);
+  const dot = (g) => svg.append('circle').attr('cx', x(xv(g))).attr('cy', y(g.rating)).attr('r', 3.5).style('fill', 'var(--accent)').style('stroke', 'var(--bg)').style('stroke-width', 1.5);
+  dot(last);
+  svg.append('text').attr('class', 'strong').attr('x', x(xv(last)) + 7).attr('y', y(last.rating) + 4).text(endLabel);
+  const pointLabel = (g, text, above) => {
+    dot(g);
+    const w = textWidth(svg, text);
+    let cx = Math.min(Math.max(x(xv(g)), m.l + w / 2), W - m.r - w / 2);
+    svg.append('text').attr('x', cx).attr('y', above ? y(g.rating) - 8 : y(g.rating) + 16).attr('text-anchor', 'middle').text(text);
+  };
+  if (peak !== last && peak.rating > last.rating) pointLabel(peak, `Peak ${fmt(peak.rating)}`, true);
+  if (low !== last) pointLabel(low, `Low ${fmt(low.rating)}`, false);
+
+  const tip = tipFor(box);
+  const hl = svg.append('circle').attr('r', 4).style('fill', 'var(--accent)').style('stroke', 'var(--bg)').style('stroke-width', 2).style('display', 'none');
+  const bis = d3.bisector(xv).center;
+  svg.append('rect').attr('x', m.l).attr('y', plotTop).attr('width', W - m.l - m.r).attr('height', H - plotTop - m.b).style('fill', 'transparent')
+    .on('pointermove', (ev) => {
+      const [px] = d3.pointer(ev);
+      const g = games[bis(games, x.invert(px))];
+      hl.style('display', null).attr('cx', x(xv(g))).attr('cy', y(g.rating));
+      tip.replaceChildren();
+      const l1 = el('div'); l1.append(el('b', '', fmt(g.rating)), ` after game ${fmt(g.i)}`);
+      tip.append(l1, el('div', 'm', `${fmtDay(g.t)} · ${g.result} as ${g.color}`), el('div', 'm', `Opponent ${fmt(g.opp)}`));
+      tip.hidden = false; placeTip(tip, box, x(xv(g)), y(g.rating));
+    })
+    .on('pointerleave', () => { tip.hidden = true; hl.style('display', 'none'); });
+}
+
+function drawMonths(rows) {
+  const box = $('monthChart'); box.replaceChildren();
+  if (!rows.length) return;
+  const W = Math.max(280, box.clientWidth), H = 260, m = { t: 10, r: 8, b: 30, l: 36 };
+  const svg = d3.select(box).append('svg').attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('role', 'img').attr('aria-label', `Wins, draws and losses in each of ${rows.length} months`);
+  const y = d3.scaleLinear().domain([0, d3.max(rows, (r) => r.games)]).nice().range([H - m.b, m.t]);
+  m.l = Math.ceil(d3.max(y.ticks(5), (t) => textWidth(svg, String(t)))) + 12;
+  svg.append('g').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickSize(-(W - m.l - m.r))).call((g) => g.select('.domain').remove());
+  const x = d3.scaleBand().domain(rows.map((r) => r.month)).range([m.l, W - m.r]).padding(0.22);
+  const every = Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor((W - m.l - m.r) / 56))));
+  svg.append('g').attr('transform', `translate(0,${H - m.b})`)
+    .call(d3.axisBottom(x).tickValues(rows.map((r) => r.month).filter((_, i) => i % every === 0))
+      .tickFormat((mo) => d3.utcFormat("%b '%y")(new Date(mo + '-01T00:00:00Z'))).tickSizeOuter(0));
+  const tip = tipFor(box);
+  rows.forEach((r) => {
+    let acc = 0;
+    [['wins', 'var(--win)'], ['draws', 'var(--draw)'], ['losses', 'var(--loss)']].forEach(([k, c]) => {
+      svg.append('rect').attr('x', x(r.month)).attr('width', x.bandwidth()).attr('y', y(acc + r[k])).attr('height', Math.max(0, y(acc) - y(acc + r[k]))).style('fill', c);
+      acc += r[k];
+    });
+    svg.append('rect').attr('x', x(r.month) - x.step() * x.paddingInner() / 2).attr('width', x.step()).attr('y', m.t).attr('height', H - m.t - m.b).style('fill', 'transparent')
+      .on('pointermove', () => {
+        tip.replaceChildren();
+        const l1 = el('div'); l1.append(el('b', '', fmtMonth(r.month)));
+        tip.append(l1, el('div', 'm', `${r.games} games · ${r.wins} W · ${r.draws} D · ${r.losses} L`), el('div', 'm', `Won ${r.winPct.toFixed(1)}% · closed at ${fmt(r.end)}`));
+        tip.hidden = false; placeTip(tip, box, x(r.month) + x.bandwidth() / 2, y(r.games));
+      })
+      .on('pointerleave', () => { tip.hidden = true; });
+  });
+}
+
+function drawOpp(rows) {
+  const box = $('oppChart'); box.replaceChildren();
+  const W = Math.max(260, box.clientWidth), rowH = 34, H = rows.length * rowH + 8;
+  const svg = d3.select(box).append('svg').attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('role', 'img').attr('aria-label', 'Score percentage against opponents grouped by rating gap');
+  const lw = d3.max(rows, (r) => textWidth(svg, r.bucket));
+  const gw = d3.max(rows, (r) => textWidth(svg, `${fmt(r.games)} games`));
+  const x = d3.scaleLinear().domain([0, 100]).range([lw + 12, W - gw - 64]);
+  svg.append('line').attr('x1', x(50)).attr('x2', x(50)).attr('y1', 0).attr('y2', H).style('stroke', 'var(--ref)').style('stroke-dasharray', '3 3');
+  rows.forEach((r, i) => {
+    const yy = i * rowH + 4;
+    svg.append('text').attr('x', 0).attr('y', yy + rowH / 2).attr('dy', '0.32em').text(r.bucket);
+    svg.append('rect').attr('x', x(0)).attr('y', yy + 7).attr('width', Math.max(0, x(r.score ?? 0) - x(0))).attr('height', rowH - 14).attr('rx', 2).style('fill', 'var(--accent)');
+    svg.append('text').attr('class', 'strong').attr('x', x(r.score ?? 0) + 6).attr('y', yy + rowH / 2).attr('dy', '0.32em').text(r.score == null ? '—' : `${r.score.toFixed(1)}%`);
+    svg.append('text').attr('x', W).attr('text-anchor', 'end').attr('y', yy + rowH / 2).attr('dy', '0.32em').text(`${fmt(r.games)} games`);
+  });
+}
+
+function fillColor(games) {
+  const tb = $('colorBody'); tb.replaceChildren();
+  ['White', 'Black'].forEach((c) => {
+    const gs = games.filter((g) => g.color === c);
+    const w = gs.filter((g) => g.result === 'Win').length, d = gs.filter((g) => g.result === 'Draw').length;
+    const tr = el('tr');
+    [c, fmt(gs.length), fmt(w), fmt(d), fmt(gs.length - w - d), gs.length ? (w / gs.length * 100).toFixed(1) + '%' : '—'].forEach((v) => tr.append(el('td', '', v)));
+    tb.append(tr);
+  });
+}
+// ---------- extra analysis ----------
+function openingName(eco) {
+  if (!eco) return 'Unknown';
+  let slug = decodeURIComponent(eco.split('/openings/')[1] || '').split('?')[0];
+  slug = slug.replace(/-\d.*$/, '');               // cut move sequences like -2...Nc6
+  const words = slug.split('-').filter(Boolean);
+  const stop = words.findIndex((w) => /^(Defense|Defence|Opening|Game|Gambit|Attack|System|Countergambit)$/.test(w));
+  const name = (stop >= 0 ? words.slice(0, stop + 1) : words.slice(0, 3)).join(' ');
+  return name || 'Unknown';
+}
+const pts = (g) => g.result === 'Win' ? 1 : g.result === 'Draw' ? 0.5 : 0;
+const scoreOf = (gs) => gs.length ? d3.sum(gs, pts) / gs.length * 100 : null;
+const pctCls = (s) => s == null ? '' : s >= 55 ? 'up' : s <= 45 ? 'down' : '';
+
+function fillMomentum(games) {
+  let best = { Win: 0, Loss: 0 }, run = 0, prev = null;
+  games.forEach((g) => {
+    run = g.result === prev ? run + 1 : 1; prev = g.result;
+    if (best[g.result] != null) best[g.result] = Math.max(best[g.result], run);
+  });
+  const afterW = [], afterL = [];
+  for (let k = 1; k < games.length; k++) {
+    if (games[k].t - games[k - 1].t > 45 * 60e3) continue;   // end-to-end gap ≈ 30 min between games
+    if (games[k - 1].result === 'Win') afterW.push(games[k]);
+    if (games[k - 1].result === 'Loss') afterL.push(games[k]);
+  }
+  const sW = scoreOf(afterW), sL = scoreOf(afterL);
+  const box = $('momentum'); box.replaceChildren();
+  const tile = (label, big, sub, cls) => { const t = el('div', 'tile'); t.append(el('span', 'label', label), el('span', 'big ' + (cls || ''), big), el('span', 'sub', sub)); box.append(t); };
+  tile('Longest win streak', fmt(best.Win), 'games in a row');
+  tile('Longest losing streak', fmt(best.Loss), 'games in a row');
+  tile('Next game after a win', sW == null ? '—' : sW.toFixed(1) + '%', `score over ${fmt(afterW.length)} games`, pctCls(sW));
+  tile('Next game after a loss', sL == null ? '—' : sL.toFixed(1) + '%', `score over ${fmt(afterL.length)} games`, pctCls(sL));
+}
+
+// Vertical score columns with game counts in the tooltip
+function drawColumns(box, rows, H) {
+  box.replaceChildren();
+  const W = Math.max(260, box.clientWidth), m = { t: 18, r: 4, b: 24, l: 34 };
+  const svg = d3.select(box).append('svg').attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img')
+    .attr('aria-label', 'Score percentage by ' + rows.map((r) => `${r.label}: ${r.score == null ? 'no games' : r.score.toFixed(0) + '%'}`).join(', '));
+  const y = d3.scaleLinear().domain([0, 100]).range([H - m.b, m.t]);
+  svg.append('g').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).tickValues([0, 25, 50, 75, 100]).tickFormat((d) => d + '%').tickSize(-(W - m.l - m.r))).call((g) => g.select('.domain').remove());
+  const x = d3.scaleBand().domain(rows.map((r) => r.label)).range([m.l, W - m.r]).padding(0.2);
+  const every = Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor((W - m.l - m.r) / 30))));
+  svg.append('g').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(rows.map((r) => r.label).filter((_, i) => i % every === 0)).tickSizeOuter(0));
+  svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(50)).attr('y2', y(50)).style('stroke', 'var(--ref)').style('stroke-dasharray', '3 3');
+  const tip = tipFor(box);
+  rows.forEach((r) => {
+    if (r.score != null) svg.append('rect').attr('x', x(r.label)).attr('width', x.bandwidth()).attr('y', y(r.score)).attr('height', y(0) - y(r.score)).attr('rx', 2)
+      .style('fill', 'var(--accent)').style('opacity', r.games < 20 ? 0.35 : 1);
+    svg.append('rect').attr('x', x(r.label) - x.step() * 0.1).attr('width', x.step()).attr('y', m.t).attr('height', H - m.t - m.b).style('fill', 'transparent')
+      .on('pointermove', () => {
+        tip.replaceChildren(); const l1 = el('div'); l1.append(el('b', '', r.long || r.label));
+        tip.append(l1, el('div', 'm', r.score == null ? 'No games' : `Score ${r.score.toFixed(1)}% · ${fmt(r.games)} games`));
+        tip.hidden = false; placeTip(tip, box, x(r.label) + x.bandwidth() / 2, y(r.score ?? 0));
+      })
+      .on('pointerleave', () => { tip.hidden = true; });
+  });
+}
+function drawTiming(games) {
+  const hours = d3.range(24).map((h) => { const gs = games.filter((g) => g.t.getHours() === h); return { label: String(h), long: `${String(h).padStart(2, '0')}:00–${String(h).padStart(2, '0')}:59`, games: gs.length, score: scoreOf(gs) }; });
+  drawColumns($('hourChart'), hours, 220);
+  const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const days = names.map((n, i) => { const gs = games.filter((g) => (g.t.getDay() + 6) % 7 === i); return { label: n, games: gs.length, score: scoreOf(gs) }; });
+  drawColumns($('dayChart'), days, 220);
+}
+
+// Horizontal bars: rows {label, value (0-100), text, right}
+function hbars(box, rows, ref) {
+  box.replaceChildren();
+  const W = Math.max(260, box.clientWidth), rowH = 32, H = rows.length * rowH + 8;
+  const svg = d3.select(box).append('svg').attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img')
+    .attr('aria-label', rows.map((r) => `${r.label}: ${r.text}`).join(', '));
+  const lw = d3.max(rows, (r) => textWidth(svg, r.label)) || 0;
+  const rw = d3.max(rows, (r) => textWidth(svg, r.right)) || 0;
+  const x = d3.scaleLinear().domain([0, 100]).range([lw + 12, W - rw - 64]);
+  if (ref != null) svg.append('line').attr('x1', x(ref)).attr('x2', x(ref)).attr('y1', 0).attr('y2', H).style('stroke', 'var(--ref)').style('stroke-dasharray', '3 3');
+  rows.forEach((r, i) => {
+    const yy = i * rowH + 4;
+    svg.append('text').attr('x', 0).attr('y', yy + rowH / 2).attr('dy', '0.32em').text(r.label);
+    svg.append('rect').attr('x', x(0)).attr('y', yy + 7).attr('width', Math.max(0, x(r.value ?? 0) - x(0))).attr('height', rowH - 14).attr('rx', 2).style('fill', r.color || 'var(--accent)');
+    svg.append('text').attr('class', 'strong').attr('x', x(r.value ?? 0) + 6).attr('y', yy + rowH / 2).attr('dy', '0.32em').text(r.text);
+    svg.append('text').attr('x', W).attr('text-anchor', 'end').attr('y', yy + rowH / 2).attr('dy', '0.32em').text(r.right);
+  });
+}
+const HOW = { checkmated: 'Checkmate', resigned: 'Resignation', timeout: 'On time', abandoned: 'Abandoned', timevsinsufficient: 'Time vs. no material' };
+function drawEndings(games) {
+  const part = (res, color) => {
+    const gs = games.filter((g) => g.result === res);
+    return d3.rollups(gs, (v) => v.length, (g) => HOW[g.how] || 'Other').sort((a, b) => b[1] - a[1])
+      .map(([label, n]) => ({ label, value: n / gs.length * 100, text: (n / gs.length * 100).toFixed(0) + '%', right: `${fmt(n)} games`, color }));
+  };
+  hbars($('winHow'), part('Win', 'var(--win)'));
+  hbars($('lossHow'), part('Loss', 'var(--loss)'));
+}
+function fillOpenings(games) {
+  [['White', 'openWhite'], ['Black', 'openBlack']].forEach(([c, id]) => {
+    const tb = $(id); tb.replaceChildren();
+    d3.groups(games.filter((g) => g.color === c), (g) => g.opening).sort((a, b) => b[1].length - a[1].length).slice(0, 8).forEach(([name, gs]) => {
+      const s = scoreOf(gs); const tr = el('tr');
+      const n = el('td', '', name); n.style.whiteSpace = 'normal';
+      tr.append(n, el('td', '', fmt(gs.length)), el('td', pctCls(s), s.toFixed(1) + '%'));
+      tb.append(tr);
+    });
+  });
+}
+function drawCalendar(games) {
+  const box = $('calendar'); box.replaceChildren();
+  const end = d3.timeDay.floor(new Date()), start = d3.timeWeek.floor(d3.timeDay.offset(end, -364));
+  const counts = d3.rollup(games.filter((g) => g.t >= start), (v) => v.length, (g) => +d3.timeDay.floor(g.t));
+  const weeks = d3.timeWeek.count(start, end) + 1;
+  const left = 28, top = 16;
+  const cell = Math.max(10, Math.min(16, Math.floor((box.parentElement.clientWidth - left) / weeks) - 2));
+  const W = left + weeks * (cell + 2), H = top + 7 * (cell + 2) + 4;
+  const svg = d3.select(box).append('svg').attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img')
+    .attr('aria-label', `Games per day over the last year: ${fmt(d3.sum(counts.values()))} games on ${counts.size} days`);
+  const max = d3.max(counts.values()) || 1;
+  const op = d3.scaleSqrt().domain([0, max]).range([0.18, 1]);
+  ['Mon', 'Wed', 'Fri'].forEach((d, i) => svg.append('text').attr('x', 0).attr('y', top + (i * 2 + 1) * (cell + 2) + cell - 2).text(d));
+  let lastMonth = -1;
+  const tip = tipFor(box);
+  d3.timeDays(start, d3.timeDay.offset(end, 1)).forEach((day) => {
+    const wk = d3.timeWeek.count(start, day), dow = day.getDay();
+    if (day.getDate() <= 7 && day.getMonth() !== lastMonth && dow === 0) { lastMonth = day.getMonth(); svg.append('text').attr('x', left + wk * (cell + 2)).attr('y', 11).text(d3.timeFormat('%b')(day)); }
+    const n = counts.get(+day) || 0;
+    const r = svg.append('rect').attr('x', left + wk * (cell + 2)).attr('y', top + ((dow + 6) % 7) * (cell + 2)).attr('width', cell).attr('height', cell).attr('rx', 2)
+      .style('fill', n ? 'var(--accent)' : 'var(--line)').style('opacity', n ? op(n) : 0.6);
+    r.on('pointermove', () => {
+      tip.replaceChildren(); const l1 = el('div'); l1.append(el('b', '', `${n} game${n === 1 ? '' : 's'}`));
+      tip.append(l1, el('div', 'm', d3.timeFormat('%a %-d %b %Y')(day))); tip.hidden = false;
+      placeTip(tip, box, left + wk * (cell + 2), top + ((dow + 6) % 7) * (cell + 2));
+    }).on('pointerleave', () => { tip.hidden = true; });
+  });
+}
+function fillBestWins(games) {
+  const tb = $('bestWins'); tb.replaceChildren();
+  games.map((g, k) => ({ ...g, before: k ? games[k - 1].rating : g.rating })).filter((g) => g.result === 'Win')
+    .sort((a, b) => b.opp - a.opp).slice(0, 5).forEach((g) => {
+      const tr = el('tr'); const gap = g.opp - g.before;
+      const a = el('a', '', 'View game'); a.href = g.url; a.target = '_blank'; a.rel = 'noopener'; a.style.color = 'var(--accent)';
+      const link = el('td'); link.append(a);
+      tr.append(el('td', '', g.oppName), el('td', '', fmt(g.opp)), el('td', gap > 0 ? 'up' : '', signed(gap)), el('td', '', fmtDay(g.t)), el('td', '', HOW[g.how] || 'Other'), link);
+      tb.append(tr);
+    });
+}
+
+// ---------- wiring ----------
+document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+  state.mode = b.dataset.mode;
+  document.querySelectorAll('[data-mode]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  drawRating();
+}));
+$('search').addEventListener('submit', (e) => { e.preventDefault(); load($('username').value); });
+let lastW = 0;
+new ResizeObserver(() => {
+  const w = $('panel').clientWidth;
+  if (state.user && Math.abs(w - lastW) > 4) { lastW = w; renderPanel(); }
+}).observe(document.querySelector('.wrap'));
+
+const fromUrl = new URLSearchParams(location.search).get('user');
+let saved = null; try { saved = localStorage.getItem('chess-journey-user'); } catch (e) {}
+const initial = fromUrl || saved;
+if (initial) { $('username').value = initial; load(initial); }
+else $('username').focus();
+</script>
+</body>
+</html>
